@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug 8086 Simulator",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/8086_sim",
+            "args": ["computer_enhance/perfaware/part1/listing_0051_memory_mov"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "C/C++: clang build active file"
+        }
+    ]
+}
