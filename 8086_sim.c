@@ -51,6 +51,8 @@ bool zero_flag = 0;
 u_int8_t instruction_memory[1024];
 u_int8_t program_memory[65536];
 
+size_t num_cycles;
+
 int calc_effective_address(int index)
 {
     int result;
@@ -271,6 +273,51 @@ void mov_instruction_mem(u_int8_t offset_idx, bool d, struct Register reg, int v
     }
 }
 
+void calc_effective_address_cycles(u_int8_t r_m, u_int16_t mod, u_int16_t disp)
+{
+
+    if (mod == 0 && r_m == 6)
+    {
+        num_cycles += 6;
+    }
+    else
+    {
+        if (r_m == 0 || r_m == 3)
+        {
+            if (disp > 0)
+            {
+                num_cycles += 11;
+            }
+            else
+            {
+                num_cycles += 7;
+            }
+        }
+        else if (r_m == 1 || r_m == 2)
+        {
+            if (disp > 0)
+            {
+                num_cycles += 12;
+            }
+            else
+            {
+                num_cycles += 8;
+            }
+        }
+        else
+        {
+            if (disp > 0)
+            {
+                num_cycles += 9;
+            }
+            else
+            {
+                num_cycles += 5;
+            }
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
 
@@ -298,6 +345,7 @@ int main(int argc, char **argv)
     }
 
     instruction_pointer = 0;
+    num_cycles = 0;
 
     // constants
     unsigned char instr_1;
@@ -350,10 +398,20 @@ int main(int argc, char **argv)
 
                     register_mem[reg_to.memory_index] = register_mem[r_m];
                 }
+                num_cycles += 2;
             }
             else
             {
                 mov_instruction_mem(r_m, d, reg_to, register_mem[reg_to.memory_index], disp, mod);
+                calc_effective_address_cycles(r_m, mod, disp);
+                if (d == 0)
+                {
+                    num_cycles += 9;
+                }
+                else
+                {
+                    num_cycles += 8;
+                }
             }
 
             free(mem_reg);
@@ -375,10 +433,13 @@ int main(int argc, char **argv)
             if (mod == 3)
             {
                 register_mem[reg_lookup_table[1][r_m].memory_index] = data;
+                num_cycles += 4;
             }
             else
             {
                 mov_instruction_mem(r_m, 0, reg_lookup_table[0][0], data, disp, mod);
+                calc_effective_address_cycles(r_m, mod, disp);
+                num_cycles += 10;
             }
 
             char num_info[5];
@@ -403,6 +464,8 @@ int main(int argc, char **argv)
             register_mem[actual_reg.memory_index] = (u_int16_t)data;
 
             printf("mov %s, %d\n", actual_reg.name, data);
+
+            num_cycles += 4;
         }
         else if (instr_1 >> 2 == MOV_MEM_ACC)
         {
@@ -422,6 +485,8 @@ int main(int argc, char **argv)
             {
                 printf("mov ax, [%d]\n", addr);
             }
+
+            num_cycles += 10;
         }
         else if (instr_1 >> 6 == 0 && (instr_1 & (1 << 2)) == 0) // regular ADD, SUB, CMP, etc.
         {
@@ -451,6 +516,23 @@ int main(int argc, char **argv)
             perform_instruction_reg(instr_idx, rto, register_mem[rfr]);
 
             free(mem_reg);
+
+            if (mod == 3)
+            {
+                num_cycles += 3;
+            }
+            else
+            {
+                calc_effective_address_cycles(r_m, mod, disp);
+                if (d == 0)
+                {
+                    num_cycles += 16;
+                }
+                else
+                {
+                    num_cycles += 9;
+                }
+            }
         }
         else if (instr_1 >> 2 == (1 << 5)) // immediate to reg/mem ADD, SUB, CMP, etc.
         {
@@ -466,7 +548,7 @@ int main(int argc, char **argv)
 
             char *to = malloc(20);
 
-            create_mem_reg_str(file, mod, r_m, w, to);
+            int disp = create_mem_reg_str(file, mod, r_m, w, to);
 
             u_int16_t data = get_num_from_file(w, s, file);
 
@@ -474,6 +556,16 @@ int main(int argc, char **argv)
 
             printf("%s %s, %d\n", instr_name, to, data);
             free(to);
+
+            if (mod == 3)
+            {
+                num_cycles += 4;
+            }
+            else
+            {
+                calc_effective_address_cycles(r_m, mod, disp);
+                num_cycles += 17;
+            }
         }
         else if (instr_1 >> 6 == 0 && ((instr_1 >> 1) & 3) == 2) // accumulator ADD, SUB, CMP, etc.
         {
@@ -496,6 +588,8 @@ int main(int argc, char **argv)
             perform_instruction_reg(instr_idx, acc.memory_index, data);
 
             printf("%s %s, %d\n", instr_name, acc.name, data);
+
+            num_cycles += 4;
         }
         else if (instr_1 >> 4 == 7) // JUMP commands
         {
@@ -542,6 +636,7 @@ int main(int argc, char **argv)
 
     printf("SIGNED FLAG: %d\n", sign_flag);
     printf("ZERO FLAG: %d\n", zero_flag);
+    printf("CYCLES ELAPSED: %d\n", num_cycles);
 
     fclose(file);
     return 0;
