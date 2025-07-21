@@ -6,6 +6,7 @@
 #include <sys/wait.h>
 
 typedef double f64;
+typedef uint8_t u8;
 typedef uint64_t u64;
 typedef uint32_t u32;
 

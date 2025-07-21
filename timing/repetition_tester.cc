@@ -1,6 +1,10 @@
 
 #include <cstdint>
+#include <fcntl.h>
+#include <mach/vm_statistics.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 
 #include "time.cc"
@@ -17,6 +21,54 @@ struct RepetitionTester {
   uint64_t page_faults;
 
   uint64_t current_start_time;
+};
+
+struct buffer {
+  size_t count;
+  u8 *data;
+};
+
+inline buffer allocate_buffer(size_t count, bool large) {
+  buffer Result;
+
+  int fildes = -1;
+
+  if (large) {
+    fildes = VM_FLAGS_SUPERPAGE_SIZE_2MB;
+  }
+
+  Result.data = (u8 *)mmap(0, count, PROT_WRITE | PROT_READ,
+                           MAP_ANON | MAP_PRIVATE, fildes, 0);
+  if (Result.data) {
+    Result.count = count;
+  } else {
+    fprintf(stderr, "ERROR: Unable to allocate %llu bytes.\n", count);
+  }
+
+  return Result;
+}
+
+inline void free_buffer(buffer *Buffer) {
+  if (Buffer->data) {
+    munmap(Buffer->data, Buffer->count);
+  }
+  Buffer->data = NULL;
+  Buffer->count = 0;
+}
+
+enum AllocationType {
+  AllocType_none,
+  AllocType_malloc,
+  AllocType_VirtualAlloc,
+  AllocType_VirtualAllocLargePages,
+
+  AllocType_Count,
+};
+
+struct ReadParameters {
+  AllocationType alloc_type;
+  buffer Dest;
+  char const *FileName;
 };
 
 void init_tester(RepetitionTester *tester, u32 num_repetitions) {
@@ -76,4 +128,53 @@ void count_page_faults(RepetitionTester *tester) {
 
 void add_bytes_processed(RepetitionTester *tester, u64 byte_count) {
   tester->bytes_processed += byte_count;
+}
+
+static void handle_allocation(RepetitionTester *Tester, ReadParameters *Params,
+                              buffer *Buffer) {
+  switch (Params->alloc_type) {
+  case AllocType_none: {
+  } break;
+
+  case AllocType_malloc: {
+    Buffer->data = (u8 *)malloc(Params->Dest.count);
+    if (Buffer->data) {
+      Buffer->count = Params->Dest.count;
+    }
+  } break;
+
+  case AllocType_VirtualAlloc:
+  case AllocType_VirtualAllocLargePages: {
+    *Buffer =
+        allocate_buffer(Params->Dest.count,
+                        Params->alloc_type == AllocType_VirtualAllocLargePages);
+  } break;
+
+  default: {
+    fprintf(stderr, "ERROR: Unrecognized allocation type");
+  } break;
+  }
+}
+
+static void handle_deallocation(ReadParameters *Params, buffer *Buffer) {
+  switch (Params->alloc_type) {
+  case AllocType_none: {
+  } break;
+
+  case AllocType_malloc: {
+    free(Buffer->data);
+  } break;
+
+  case AllocType_VirtualAlloc:
+  case AllocType_VirtualAllocLargePages: {
+
+    free_buffer(Buffer);
+    Buffer->data = NULL;
+    Buffer->count = 0;
+  } break;
+
+  default: {
+    fprintf(stderr, "ERROR: Unrecognized allocation type");
+  } break;
+  }
 }
