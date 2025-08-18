@@ -104,7 +104,7 @@ struct TraceBlock {
     t0 = read_cpu_timer();
     global_parent_index = index;
     elapsed_time_prev = PROFILER.timings[index].elapsed_total;
-    PROFILER.timings[index].byte_count = byte_count;
+    PROFILER.timings[index].byte_count += byte_count;
   }
 
   ~TraceBlock() {
@@ -185,6 +185,7 @@ static void end_profile() {
          (f64)total_elapsed / (f64)freq, freq);
 
   PRINT_TIMINGS(total_elapsed, freq);
+  memset(&PROFILER, 0, sizeof(PROFILER));
 }
 //
 // u64 __COUNTER_START__;
