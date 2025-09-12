@@ -9,8 +9,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <arm_neon.h>
 
 #define PROFILE 1
+
+
+constexpr double PI = 3.14159265358979323846;
 
 typedef double f64;
 #include "../computer_enhance/perfaware/part2/listing_0065_haversine_formula.cpp"
@@ -186,21 +190,119 @@ typedef struct RangeCheck {
   Math_funcs func;
   f64 min;
   f64 max;
+  f64 max_error_from_ref;
+  f64 max_error_val;
 } RangeCheck;
 
 RangeCheck init(Math_funcs func) {
   return RangeCheck {
-    func, DBL_MAX, DBL_MIN 
+    func, DBL_MAX, DBL_MIN, DBL_MIN
   };
 }
 
 RangeCheck Sin, Cos, Asin, Sqrt;
 
-f64 calc(f64 val, RangeCheck& check) {
-  check.min = min(val, check.min);
-  check.max = max(val, check.max);
+f64 fit_x2(f64 v) {
+  // from fitting from 0 to pi/2
+  f64 a = -0.335749;
+  f64 b =  1.16401;
+   
 
-  switch (check.func) {
+  return a*v*v + v*b;
+}
+ 
+f64 fact(u64 x) {
+  f64 res = (f64)x;
+  while ( x> 1 ){
+    res *= --x;
+  }
+  return res;
+}
+
+// inline f64 TaylorSineHorner(u32 MaxPower, f64 X)
+// {
+//     f64 Result = 0;
+//
+//     f64 X2 = X*X;
+//     for(u32 InvPower = 1; InvPower <= MaxPower; InvPower += 2)
+//     {
+//         u32 Power = MaxPower - (InvPower - 1);
+//         Result = Result*X2 + TaylorSineCoefficient(Power);
+//     }
+//     Result *= X;
+//     
+//     return Result;
+// }
+
+f64 fit_taylor_horner(size_t order, f64 x) {
+
+  float64x1_t vy = vdup_n_f64(0.0);
+  float64x1_t x_2 = vdup_n_f64(x * x);
+  u64 real_order = ((order - 1)/2)*2 + 1;
+
+  for(int i = 1; i <= real_order; i+=2) {
+    int pow = real_order - (i - 1);
+    f64 sign = ((pow - 1)/2 % 2) ? -1.0 : 1.0;
+    f64 coeff = sign / fact(pow); 
+    vy = vfma_f64(vdup_n_f64(coeff), vy, x_2);
+  }
+
+  f64 y = vget_lane_f64(vy, 0);
+  y *= x;
+
+  return y;
+}
+
+
+f64 fit_taylor_zero(size_t order, f64 x) {
+  f64 y = x;
+  f64 cur_x = x;
+  f64 cur_den = 1;
+  f64 sign = 1.0;
+  for(int i = 3; i < order; i+=2) {
+    cur_x *= x * x;
+    cur_den *= i * (i - 1);
+    sign *= -1.0;
+    
+    y += sign * cur_x / cur_den;
+  }
+
+  return y;
+}
+
+f64 csin(f64 v) {
+
+  f64 res;
+  if (fabs(v) > PI/2) {
+    res = fit_taylor_horner(50, PI/2 - (fabs(v) - PI/2));
+  } else {
+    res = fit_taylor_horner(50, fabs(v));
+  }
+
+  if (v < 0) {
+    res *= -1;
+  }
+  
+  return res;
+}
+
+f64 ccos(f64 v) {
+  return csin(v + PI/2);
+}
+
+f64 casin(f64 v) {
+
+  return v;
+}
+
+f64 csqrt(f64 v) {
+  float64x1_t vs = vdup_n_f64(v);
+  float64x1_t vsqrt = vsqrt_f64(vs);
+  return vget_lane_f64(vsqrt, 0);
+}
+
+f64 func_eval(f64 val, Math_funcs func) {
+  switch (func) {
     case SIN:
     return sin(val);
     case COS:
@@ -211,6 +313,37 @@ f64 calc(f64 val, RangeCheck& check) {
   return sqrt(val);
   
   }
+
+}
+f64 cfunc_eval(f64 val, Math_funcs func) {
+  switch (func) {
+    case SIN:
+    return csin(val);
+    case COS:
+    return ccos(val);
+    case ASIN:
+  return casin(val);
+    case SQRT:
+  return csqrt(val);
+  
+  }
+
+}
+
+f64 calc(f64 val, RangeCheck& check) {
+  check.min = min(val, check.min);
+  check.max = max(val, check.max);
+
+  f64 rval = func_eval(val, check.func);
+  f64 cval = cfunc_eval(val, check.func);
+
+  if (check.max_error_from_ref < fabs(rval - cval)) {
+    check.max_error_from_ref = fabs(rval - cval);
+    check.max_error_val = val;
+  }
+
+    return cval;
+
 }
 
 
@@ -371,9 +504,11 @@ int main(int argc, char **argv) {
   Verification verification_result = compute_reference_average(&output, answers);
 
 
-  printf("RANGE OF OUTPUTS:\nSIN:(%f,%f)\nCOS: (%f,%f)\nASIN: (%f,%f)\nSQRT: (%f,%f)\n", Sin.min, Sin.max, Cos.min, Cos.max, Asin.min, Asin.max, Sqrt.min, Sqrt.max);
+  printf("RANGE OF OUTPUTS:\n  SIN:(%f,%f)\n  COS: (%f,%f)\n  ASIN: (%f,%f)\n  SQRT: (%f,%f)\n", Sin.min, Sin.max, Cos.min, Cos.max, Asin.min, Asin.max, Sqrt.min, Sqrt.max);
   printf("Haversine Sum: OURS: %.17g, REF: %.17g, EQUAL? %d\n", average_haversine, verification_result.sum, ApproxAreEqual(average_haversine, verification_result.sum));
   printf("NUM ERRORS IN REF CALC: %lu\n", verification_result.num_errors);
+
+  printf("MAX REF ERRORS:\n  SIN: %f - from %f\n  COS: %f - from %f\n  ASIN: %f - from %f\n  SQRT: %f - from %f\n", Sin.max_error_from_ref, Sin.max_error_val, Cos.max_error_from_ref, Cos.max_error_val, Asin.max_error_from_ref, Asin.max_error_val, Sqrt.max_error_from_ref, Sqrt.max_error_val);
   
   delete[] output.pairs;
 }
